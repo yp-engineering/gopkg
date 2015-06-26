@@ -58,7 +58,7 @@ func run() error {
 var gogetTemplate = template.Must(template.New("").Parse(`
 <html>
 <head>
-<meta name="go-import" content="{{.GopkgRoot}} git https://{{.GopkgRoot}}">
+<meta name="go-import" content="{{.GopkgRoot}} git {{.GopkgRootURL}}">
 {{$root := .GitHubRoot}}{{$tree := .GitHubTree}}<meta name="go-source" content="{{.GopkgRoot}} _ https://{{$root}}/tree/{{$tree}}{/dir} https://{{$root}}/blob/{{$tree}}{/dir}/{file}#L{line}">
 </head>
 <body>
@@ -77,12 +77,15 @@ type Repo struct {
 
 	// FullVersion is the best version in AllVersions that matches MajorVersion.
 	// It defaults to InvalidVersion if there are no matches.
-	FullVersion    Version
+	FullVersion Version
 
 	// AllVersions holds all versions currently available in the repository,
 	// either coming from branch names or from tag names. Version zero (v0)
 	// is only present in the list if it really exists in the repository.
-	AllVersions    VersionList
+	AllVersions VersionList
+
+	// The incoming request
+	Request *http.Request
 }
 
 // SetVersions records in the relevant fields the details about which
@@ -118,6 +121,16 @@ func (repo *Repo) GopkgRoot() string {
 	return repo.GopkgVersionRoot(repo.MajorVersion)
 }
 
+func (repo *Repo) GopkgRootURL() string {
+	// repo.Request.TLS ?
+	// turn on https if supported, not just if requested
+	var https string
+	if *httpsFlag != "" {
+		https = "s"
+	}
+	return "http" + https + "://" + repo.GopkgRoot()
+}
+
 // GopkgPath returns the package path at gopkg.in, without a schema.
 func (repo *Repo) GopkgPath() string {
 	return repo.GopkgVersionRoot(repo.MajorVersion) + repo.SubPath
@@ -126,20 +139,21 @@ func (repo *Repo) GopkgPath() string {
 // GopkgVersionRoot returns the package root in gopkg.in for the
 // provided version, without a schema.
 func (repo *Repo) GopkgVersionRoot(version Version) string {
+	host := repo.Request.Host + "/"
 	version.Minor = -1
 	version.Patch = -1
 	v := version.String()
 	if repo.OldFormat {
 		if repo.User == "" {
-			return "gopkg.in/" + v + "/" + repo.Name
+			return host + v + "/" + repo.Name
 		} else {
-			return "gopkg.in/" + repo.User + "/" + v + "/" + repo.Name
+			return host + repo.User + "/" + v + "/" + repo.Name
 		}
 	} else {
 		if repo.User == "" {
-			return "gopkg.in/" + repo.Name + "." + v
+			return host + repo.Name + "." + v
 		} else {
-			return "gopkg.in/" + repo.User + "/" + repo.Name + "." + v
+			return host + repo.User + "/" + repo.Name + "." + v
 		}
 	}
 }
@@ -186,6 +200,7 @@ func handler(resp http.ResponseWriter, req *http.Request) {
 		SubPath:     m[5],
 		OldFormat:   oldFormat,
 		FullVersion: InvalidVersion,
+		Request:     req,
 	}
 
 	var ok bool
